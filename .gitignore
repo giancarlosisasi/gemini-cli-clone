@@ -1,0 +1,17 @@
+*.exe
+*.exe~
+*.dll
+*.so
+*.dylib
+gemini-cli-clone
+gemini-cli-clone.exe
+
+*.out
+
+.DS_Store
+Thumbs.db
+
+.env
+
+dist/
+build/
