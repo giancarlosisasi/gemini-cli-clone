@@ -34,29 +34,33 @@ func NewGeminiClient(config *config.Config) (*Client, error) {
 	}, nil
 }
 
-func (c *Client) Chat(ctx context.Context, message string) (string, error) {
-	config := &genai.GenerateContentConfig{
-		Temperature: genai.Ptr[float32](0.5),
-	}
-	chat, err := c.client.Chats.Create(ctx, c.config.GeminiModel, config, nil)
-	if err != nil {
-		log.Fatal().Err(err).Msg("Error to create chat in gemini")
-	}
+func (c *Client) Chat(ctx context.Context, message string) <-chan StreamChunk {
+	resultChan := make(chan StreamChunk)
 
-	result, err := chat.SendMessage(ctx, genai.Part{Text: message})
-	if err != nil {
-		log.Fatal().Err(err).Msg("Error to send message to gemini api")
-	}
+	go func() {
 
-	return result.Text(), nil
-}
+		config := &genai.GenerateContentConfig{
+			Temperature: genai.Ptr[float32](0.5),
+		}
 
-func extractFinishReason(result *genai.GenerateContentConfig) string {
-	// TODO:
-	return "stop"
-}
+		chat, err := c.client.Chats.Create(ctx, c.config.GeminiModel, config, nil)
+		if err != nil {
+			log.Debug().Err(err).Msg("Error to create chat in gemini")
 
-func extractTokenCount(result *genai.GenerateContentResponse) int {
-	// TODO:
-	return 0
+			resultChan <- StreamChunk{Error: err}
+		}
+
+		for result, err := range chat.SendMessageStream(ctx, genai.Part{Text: message}) {
+			if err != nil {
+				resultChan <- StreamChunk{Error: err}
+				return
+			}
+
+			resultChan <- StreamChunk{Text: result.Text()}
+		}
+
+		resultChan <- StreamChunk{Done: true}
+	}()
+
+	return resultChan
 }

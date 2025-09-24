@@ -9,3 +9,9 @@ type Response struct {
 	TokenCount   int           `json:"token_count"`
 	FinishReason string        `json:"finish_reason"`
 }
+
+type StreamChunk struct {
+	Text  string
+	Error error
+	Done  bool
+}

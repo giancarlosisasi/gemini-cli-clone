@@ -1,14 +1,21 @@
 package cmd
 
 import (
+	"bufio"
 	"context"
 	"fmt"
+	"os"
+	"strings"
 
 	"github.com/charmbracelet/lipgloss"
 	"github.com/giancarlosisasi/gemini-cli-clone/internal/config"
 	"github.com/giancarlosisasi/gemini-cli-clone/internal/gemini"
+	"github.com/rs/zerolog/log"
 	"github.com/spf13/cobra"
 )
+
+const blue = "#1D56F4"
+const purple = "#7D56F4"
 
 var chatCmd = &cobra.Command{
 	Use:   "chat",
@@ -27,23 +34,37 @@ Examples:
 			return err
 		}
 
-		ctx := context.Background()
+		fmt.Print(styleTextColor("You: ", purple))
 
-		answer, err := geminiClient.Chat(ctx, "What's the weather in Lima Peru?")
-		if err != nil {
-			return err
+		var userMessage string
+		scanner := bufio.NewScanner(os.Stdin)
+		if scanner.Scan() {
+			userMessage = strings.TrimSpace(scanner.Text())
+		}
+		if err := scanner.Err(); err != nil {
+			log.Fatal().Err(err).Msg("error reading the user input")
+
 		}
 
-		style := lipgloss.NewStyle().
-			Bold(true).
-			Foreground(lipgloss.Color("#FAFAFA")).
-			Background(lipgloss.Color("#7D56F4")).
-			PaddingTop(1).
-			PaddingLeft(4)
+		fmt.Println(styleTextColor("Gemini answer:", purple))
 
-		fmt.Println(style.Render(answer))
+		ctx := context.Background()
+		for chunk := range geminiClient.Chat(ctx, userMessage) {
+			if chunk.Error != nil {
+				log.Fatal().Err(chunk.Error).Msg("error to process answer")
+			}
+
+			if chunk.Done {
+				break
+			}
+
+			fmt.Print(styleTextColor(chunk.Text, blue))
+		}
+
+		fmt.Println() // Final newline
 
 		return nil
+
 	},
 }
 
@@ -52,4 +73,10 @@ func init() {
 
 	// specific flags for the chat
 	chatCmd.Flags().StringP("model", "m", "gemini-pro", "Gemini model to use")
+}
+
+func styleTextColor(text string, color string) string {
+	style := lipgloss.NewStyle().Foreground(lipgloss.Color(color))
+
+	return style.Render(text)
 }
