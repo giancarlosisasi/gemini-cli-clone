@@ -10,7 +10,7 @@ type Response struct {
 	FinishReason string        `json:"finish_reason"`
 }
 
-type StreamChunk struct {
+type GeminiChatStreamChunk struct {
 	Text  string
 	Error error
 	Done  bool

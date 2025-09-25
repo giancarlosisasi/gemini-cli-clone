@@ -34,8 +34,8 @@ func NewGeminiClient(config *config.Config) (*Client, error) {
 	}, nil
 }
 
-func (c *Client) Chat(ctx context.Context, message string) <-chan StreamChunk {
-	resultChan := make(chan StreamChunk)
+func (c *Client) Chat(ctx context.Context, message string) <-chan GeminiChatStreamChunk {
+	resultChan := make(chan GeminiChatStreamChunk)
 
 	go func() {
 
@@ -47,19 +47,19 @@ func (c *Client) Chat(ctx context.Context, message string) <-chan StreamChunk {
 		if err != nil {
 			log.Debug().Err(err).Msg("Error to create chat in gemini")
 
-			resultChan <- StreamChunk{Error: err}
+			resultChan <- GeminiChatStreamChunk{Error: err}
 		}
 
 		for result, err := range chat.SendMessageStream(ctx, genai.Part{Text: message}) {
 			if err != nil {
-				resultChan <- StreamChunk{Error: err}
+				resultChan <- GeminiChatStreamChunk{Error: err}
 				return
 			}
 
-			resultChan <- StreamChunk{Text: result.Text()}
+			resultChan <- GeminiChatStreamChunk{Text: result.Text()}
 		}
 
-		resultChan <- StreamChunk{Done: true}
+		resultChan <- GeminiChatStreamChunk{Done: true}
 	}()
 
 	return resultChan
