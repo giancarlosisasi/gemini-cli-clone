@@ -6,6 +6,7 @@ import (
 
 	"github.com/charmbracelet/bubbles/spinner"
 	tea "github.com/charmbracelet/bubbletea"
+	"github.com/charmbracelet/glamour"
 	"github.com/charmbracelet/lipgloss"
 	"github.com/giancarlosisasi/gemini-cli-clone/internal/gemini"
 )
@@ -13,8 +14,8 @@ import (
 const idle = "idle"
 const streaming = "streaming"
 const answered = "answered"
-const blue = "#1D56F4"
-const purple = "#7D56F4"
+const cyan = "#00d7d7"
+const cyanBlue = "#87d7ff"
 
 var activeGeminiStreamChat <-chan gemini.GeminiChatStreamChunk
 
@@ -28,12 +29,15 @@ type TUIModel struct {
 	status       string // streaming, idle, done
 	spinner      spinner.Model
 	chats        []*chat
+	// viewport     viewport.Model
 }
 
 func NewTUIModel(geminiClient *gemini.Client) *TUIModel {
 	s := spinner.New()
 	s.Spinner = spinner.Dot
 	s.Style = lipgloss.NewStyle().Foreground(lipgloss.Color("205"))
+
+	// vp := viewport.New(80, 20)
 
 	defaultChat := chat{question: "", answer: ""}
 	return &TUIModel{
@@ -43,6 +47,7 @@ func NewTUIModel(geminiClient *gemini.Client) *TUIModel {
 		chats: []*chat{
 			&defaultChat,
 		},
+		// viewport: vp,
 	}
 }
 
@@ -98,8 +103,12 @@ func (m TUIModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, tea.Batch(m.spinner.Tick, m.readNextChunk())
 
 	case geminiStreamingChunk:
-		c := styleTextColor(msg.text, blue)
-		currentChat.answer = fmt.Sprintf("%s%s", currentChat.answer, c)
+		// c := styleTextColor(msg.text, blue)
+		currentChat.answer = fmt.Sprintf("%s%s", currentChat.answer, msg.text)
+
+		// update viewport
+		// m.viewport.SetContent(currentChat.answer)
+
 		return m, m.readNextChunk()
 
 	case geminiStreamingDone:
@@ -146,23 +155,33 @@ func (m TUIModel) readNextChunk() tea.Cmd {
 }
 
 func (m TUIModel) View() string {
+	// msg := fmt.Sprintf("%s\n", m.viewport.View())
 	msg := ""
 
-	for _, chat := range m.chats {
+	for i, chat := range m.chats {
+		isCurrentChat := false
+		if i == len(m.chats)-1 {
+			isCurrentChat = true
+		}
+
 		header := fmt.Sprintf(`-----------------------------------------
 > %s
 -----------------------------------------`, chat.question)
 
-		if m.status == streaming {
+		if m.status == streaming && isCurrentChat {
 			header = fmt.Sprintf(`%s
 %s processing...`, header, m.spinner.View())
 		}
 
 		body := fmt.Sprintf(`
-%s
-`, chat.answer)
+%s`, chat.answer)
 
-		msg = fmt.Sprintf("%s%s%s", msg, header, body)
+		out, err := glamour.Render(body, "dark")
+		if err != nil {
+			msg = fmt.Sprintf("%s\n%s", msg, "failed to process this question.")
+		}
+
+		msg = fmt.Sprintf("%s\n%s%s", msg, styleTextColor(header, cyanBlue), out)
 	}
 
 	return msg
