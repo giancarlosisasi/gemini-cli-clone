@@ -3,8 +3,10 @@ package tui
 import (
 	"context"
 	"fmt"
+	"strings"
 
 	"github.com/charmbracelet/bubbles/spinner"
+	"github.com/charmbracelet/bubbles/textinput"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/glamour"
 	"github.com/charmbracelet/lipgloss"
@@ -14,22 +16,25 @@ import (
 const idle = "idle"
 const streaming = "streaming"
 const answered = "answered"
-const cyan = "#00d7d7"
+
+// const cyan = "#00d7d7"
 const cyanBlue = "#87d7ff"
 
 var activeGeminiStreamChat <-chan gemini.GeminiChatStreamChunk
 
 type chat struct {
-	question string
-	answer   string
+	// question string
+	answer    string
+	textInput textinput.Model
 }
 
 type TUIModel struct {
 	geminiClient *gemini.Client
 	status       string // streaming, idle, done
-	spinner      spinner.Model
 	chats        []*chat
 	// viewport     viewport.Model
+	// components
+	spinner spinner.Model
 }
 
 func NewTUIModel(geminiClient *gemini.Client) *TUIModel {
@@ -38,8 +43,14 @@ func NewTUIModel(geminiClient *gemini.Client) *TUIModel {
 	s.Style = lipgloss.NewStyle().Foreground(lipgloss.Color("205"))
 
 	// vp := viewport.New(80, 20)
+	ti := createTextInputModel()
 
-	defaultChat := chat{question: "", answer: ""}
+	defaultChat := chat{
+		// question: "",
+		answer:    "",
+		textInput: ti,
+	}
+
 	return &TUIModel{
 		geminiClient: geminiClient,
 		status:       idle,
@@ -47,7 +58,6 @@ func NewTUIModel(geminiClient *gemini.Client) *TUIModel {
 		chats: []*chat{
 			&defaultChat,
 		},
-		// viewport: vp,
 	}
 }
 
@@ -77,20 +87,22 @@ func (m TUIModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		switch msg.String() {
 		case "ctrl+c":
 			return m, tea.Quit
-		case "enter":
-			if currentChat.question != "" && m.status != streaming {
+		case tea.KeyEnter.String():
+			v := strings.TrimSpace(currentChat.textInput.Value())
+			if len(v) > 0 && m.status != streaming {
 				return m, m.startGeminiChatStreamCmd()
 			}
-		case "backspace":
-			if len(currentChat.question) > 0 {
-				currentChat.question = currentChat.question[:len(currentChat.question)-1]
-			}
-		default:
-			// Filter out special keys that shouldn't be added to message
-			if len(msg.String()) == 1 {
-				currentChat.question = fmt.Sprintf("%s%s", currentChat.question, msg.String())
-			}
 		}
+
+		var cmd tea.Cmd
+		// newQuestion := fmt.Sprintf("%s%s", currentChat.textInput.View(), msg.String())
+		// currentChat.textInput, cmd = currentChat.textInput.Update(newQuestion)
+		currentChat.textInput, cmd = currentChat.textInput.Update(msg)
+
+		return m, cmd
+
+	// case tea.WindowSizeMsg:
+	// 	currentChat.textInput.Width = msg.Width - 10
 
 	case spinner.TickMsg:
 		if m.status == streaming {
@@ -113,8 +125,9 @@ func (m TUIModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case geminiStreamingDone:
 		m.status = answered
+		ti := createTextInputModel()
 		// create/initialize a new chat for the next question
-		m.chats = append(m.chats, &chat{question: "", answer: ""})
+		m.chats = append(m.chats, &chat{answer: "", textInput: ti})
 	}
 
 	return m, nil
@@ -127,7 +140,7 @@ func (m TUIModel) startGeminiChatStreamCmd() tea.Cmd {
 		currentChat := m.chats[len(m.chats)-1]
 		// run it async (make sure to create custom commands because bubbletea is not thread-safe)
 		ctx := context.Background()
-		activeGeminiStreamChat = m.geminiClient.Chat(ctx, currentChat.question)
+		activeGeminiStreamChat = m.geminiClient.Chat(ctx, currentChat.textInput.Value())
 
 		return geminiStreamingStarted{}
 	}
@@ -164,9 +177,7 @@ func (m TUIModel) View() string {
 			isCurrentChat = true
 		}
 
-		header := fmt.Sprintf(`-----------------------------------------
-> %s
------------------------------------------`, chat.question)
+		header := chat.textInput.View()
 
 		if m.status == streaming && isCurrentChat {
 			header = fmt.Sprintf(`%s
@@ -191,4 +202,15 @@ func styleTextColor(text string, color string) string {
 	style := lipgloss.NewStyle().Foreground(lipgloss.Color(color))
 
 	return style.Render(text)
+}
+
+func createTextInputModel() textinput.Model {
+	ti := textinput.New()
+	ti.Placeholder = "How can I help you today?"
+	// initially we were using the tea.WindowSizeMsg but that is only dispatched at the start
+	// we need to always set this because we are creating multiple inputs for each chat conversation
+	ti.Width = 100
+	ti.Focus()
+
+	return ti
 }

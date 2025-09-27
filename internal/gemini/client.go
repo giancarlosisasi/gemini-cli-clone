@@ -12,6 +12,7 @@ import (
 type Client struct {
 	client *genai.Client
 	config *config.Config
+	chat   *genai.Chat
 }
 
 func NewGeminiClient(config *config.Config) (*Client, error) {
@@ -43,14 +44,18 @@ func (c *Client) Chat(ctx context.Context, message string) <-chan GeminiChatStre
 			Temperature: genai.Ptr[float32](0.5),
 		}
 
-		chat, err := c.client.Chats.Create(ctx, c.config.GeminiModel, config, nil)
-		if err != nil {
-			log.Debug().Err(err).Msg("Error to create chat in gemini")
+		var err error
 
-			resultChan <- GeminiChatStreamChunk{Error: err}
+		if c.chat == nil {
+			c.chat, err = c.client.Chats.Create(ctx, c.config.GeminiModel, config, nil)
+			if err != nil {
+				log.Debug().Err(err).Msg("Error to create chat in gemini")
+
+				resultChan <- GeminiChatStreamChunk{Error: err}
+			}
 		}
 
-		for result, err := range chat.SendMessageStream(ctx, genai.Part{Text: message}) {
+		for result, err := range c.chat.SendMessageStream(ctx, genai.Part{Text: message}) {
 			if err != nil {
 				resultChan <- GeminiChatStreamChunk{Error: err}
 				return
