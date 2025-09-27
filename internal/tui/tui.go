@@ -7,6 +7,7 @@ import (
 
 	"github.com/charmbracelet/bubbles/spinner"
 	"github.com/charmbracelet/bubbles/textinput"
+	"github.com/charmbracelet/bubbles/viewport"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/glamour"
 	"github.com/charmbracelet/lipgloss"
@@ -32,9 +33,10 @@ type TUIModel struct {
 	geminiClient *gemini.Client
 	status       string // streaming, idle, done
 	chats        []*chat
-	// viewport     viewport.Model
+	ready        bool
 	// components
-	spinner spinner.Model
+	viewport viewport.Model
+	spinner  spinner.Model
 }
 
 func NewTUIModel(geminiClient *gemini.Client) *TUIModel {
@@ -42,7 +44,6 @@ func NewTUIModel(geminiClient *gemini.Client) *TUIModel {
 	s.Spinner = spinner.Dot
 	s.Style = lipgloss.NewStyle().Foreground(lipgloss.Color("205"))
 
-	// vp := viewport.New(80, 20)
 	ti := createTextInputModel()
 
 	defaultChat := chat{
@@ -63,7 +64,7 @@ func NewTUIModel(geminiClient *gemini.Client) *TUIModel {
 
 func InitTUI(geminiClient *gemini.Client) error {
 	model := NewTUIModel(geminiClient)
-	p := tea.NewProgram(model)
+	p := tea.NewProgram(model, tea.WithAltScreen(), tea.WithMouseCellMotion(), tea.WithMouseAllMotion())
 	if _, err := p.Run(); err != nil {
 		return err
 	}
@@ -81,28 +82,63 @@ func (m TUIModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	currentChat := m.chats[len(m.chats)-1]
 
 	switch msg := msg.(type) {
+	case tea.WindowSizeMsg:
+		if !m.ready {
+			m.viewport = viewport.New(msg.Height, msg.Height)
+			m.viewport.Style = lipgloss.NewStyle().BorderStyle(lipgloss.RoundedBorder()).
+				BorderForeground(lipgloss.Color("62"))
+			m.viewport.MouseWheelEnabled = true
+			m.ready = true
+		} else {
+			m.viewport.Width = msg.Width
+			m.viewport.Height = msg.Height
+		}
+
+		currentChat.textInput.Width = msg.Width - 10
+
+		return m, nil
+
 	// its a key press
 	case tea.KeyMsg:
 		// cool, what was the actual key pressed?
 		switch msg.String() {
 		case "ctrl+c":
 			return m, tea.Quit
+		case "pgup":
+			m.viewport.HalfPageUp()
+			return m, nil
+		case "pgdown":
+			m.viewport.HalfPageDown()
+			return m, nil
+		case "home":
+			m.viewport.GotoTop()
+			return m, nil
+		case "end":
+			m.viewport.GotoBottom()
+			return m, nil
 		case tea.KeyEnter.String():
 			v := strings.TrimSpace(currentChat.textInput.Value())
 			if len(v) > 0 && m.status != streaming {
+				// remove focus from the current chat
+				currentChat = m.chats[len(m.chats)-1]
+				currentChat.textInput.Blur()
+
 				return m, m.startGeminiChatStreamCmd()
 			}
+
+			return m, nil
 		}
 
-		var cmd tea.Cmd
-		// newQuestion := fmt.Sprintf("%s%s", currentChat.textInput.View(), msg.String())
-		// currentChat.textInput, cmd = currentChat.textInput.Update(newQuestion)
 		currentChat.textInput, cmd = currentChat.textInput.Update(msg)
-
 		return m, cmd
 
-	// case tea.WindowSizeMsg:
-	// 	currentChat.textInput.Width = msg.Width - 10
+	case tea.MouseMsg:
+		switch msg.Button {
+		case tea.MouseButtonWheelUp, tea.MouseButtonWheelDown:
+			m.viewport, cmd = m.viewport.Update(msg)
+			return m, cmd
+		}
+		return m, nil
 
 	case spinner.TickMsg:
 		if m.status == streaming {
@@ -115,22 +151,22 @@ func (m TUIModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, tea.Batch(m.spinner.Tick, m.readNextChunk())
 
 	case geminiStreamingChunk:
-		// c := styleTextColor(msg.text, blue)
 		currentChat.answer = fmt.Sprintf("%s%s", currentChat.answer, msg.text)
 
-		// update viewport
-		// m.viewport.SetContent(currentChat.answer)
+		m.updateViewportContent()
+		m.viewport.GotoBottom()
 
 		return m, m.readNextChunk()
 
 	case geminiStreamingDone:
 		m.status = answered
+
 		ti := createTextInputModel()
 		// create/initialize a new chat for the next question
 		m.chats = append(m.chats, &chat{answer: "", textInput: ti})
 	}
 
-	return m, nil
+	return m, cmd
 }
 
 type geminiStreamingStarted struct{}
@@ -168,8 +204,17 @@ func (m TUIModel) readNextChunk() tea.Cmd {
 }
 
 func (m TUIModel) View() string {
-	// msg := fmt.Sprintf("%s\n", m.viewport.View())
-	msg := ""
+	if !m.ready {
+		return "Initializing..."
+	}
+
+	m.updateViewportContent()
+
+	return m.viewport.View()
+}
+
+func (m *TUIModel) updateViewportContent() {
+	var msg strings.Builder
 
 	for i, chat := range m.chats {
 		isCurrentChat := false
@@ -178,24 +223,24 @@ func (m TUIModel) View() string {
 		}
 
 		header := chat.textInput.View()
-
-		if m.status == streaming && isCurrentChat {
-			header = fmt.Sprintf(`%s
-%s processing...`, header, m.spinner.View())
-		}
-
 		body := fmt.Sprintf(`
 %s`, chat.answer)
 
 		out, err := glamour.Render(body, "dark")
 		if err != nil {
-			msg = fmt.Sprintf("%s\n%s", msg, "failed to process this question.")
+			// msg = fmt.Sprintf("%s\n%s", msg, "failed to process this question.")
+			msg.WriteString("Failed to process this question")
 		}
 
-		msg = fmt.Sprintf("%s\n%s%s", msg, styleTextColor(header, cyanBlue), out)
+		if m.status == streaming && isCurrentChat {
+			out = fmt.Sprintf(`%s
+%s processing...`, out, m.spinner.View())
+		}
+
+		msg.WriteString(fmt.Sprintf("%s%s", styleTextColor(header, cyanBlue), out))
 	}
 
-	return msg
+	m.viewport.SetContent(msg.String())
 }
 
 func styleTextColor(text string, color string) string {
