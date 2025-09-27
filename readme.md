@@ -7,4 +7,4 @@ A simple CLI clone of the Gemini API that I have built to learn more about CLI d
 
 ## Demo
 
-![Demo](./golang-gemini-cli-clone.gif)
+![Demo](./golang-gemini-cli-clone-demo.gif)
